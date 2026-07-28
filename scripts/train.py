@@ -149,12 +149,16 @@ def train_step(
         chunked_loss = model.compute_loss(rng, observation, actions, train=True)
         if rabc_weight is None:
             return jnp.mean(chunked_loss)
-        # RA-BC (SARM2-bread-UMI docs/R1_OPENPI_CONFIG_DRAFT.md section 6):
-        # per-sample weight = raw reward-model dP at the chunk's start frame,
-        # normalized to mean 1 within the batch. Negative weights (~5-10% of
-        # frames, regressing motion) are kept by design.
+        # RA-BC (SARM2-bread-UMI docs/R1_OPENPI_CONFIG_DRAFT.md section 6,
+        # amended 2026-07-28): per-sample weight = reward-model dP at the
+        # chunk's start frame, CLIPPED AT ZERO before batch-mean-normalizing.
+        # Raw negative weights turn the loss term into unbounded gradient
+        # ascent on those samples -- the tiny-overfit gate demonstrated this
+        # empirically (loss went negative and diverged after ~800 steps).
+        # Regressing frames contribute no imitation signal instead.
         per_sample = jnp.mean(chunked_loss.reshape(chunked_loss.shape[0], -1), axis=-1)
-        w = rabc_weight / (jnp.mean(rabc_weight) + 1e-8)
+        w = jnp.clip(rabc_weight, 0.0, None)
+        w = w / (jnp.mean(w) + 1e-8)
         return jnp.mean(per_sample * w)
 
     train_rng = jax.random.fold_in(rng, state.step)
@@ -198,10 +202,13 @@ def train_step(
     if rabc_weight is not None:
         # Reporting obligation: the effective-weight distribution must be
         # visible (near-uniform on all-success data is the expected result).
-        wn = rabc_weight / (jnp.mean(rabc_weight) + 1e-8)
+        # frac_neg is measured on the RAW weights (they are clipped to zero
+        # inside the loss).
+        wc = jnp.clip(rabc_weight, 0.0, None)
+        wn = wc / (jnp.mean(wc) + 1e-8)
         info["rabc_w_std"] = jnp.std(wn)
         info["rabc_w_max"] = jnp.max(wn)
-        info["rabc_w_frac_neg"] = jnp.mean((wn < 0).astype(jnp.float32))
+        info["rabc_w_frac_neg"] = jnp.mean((rabc_weight < 0).astype(jnp.float32))
     return new_state, info
 
 
