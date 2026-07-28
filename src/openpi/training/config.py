@@ -832,6 +832,7 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
         keep_period=2_500,
+        num_workers=16,
     ),
     TrainConfig(
         name="pi05_bread_r1_lora",
@@ -856,6 +857,7 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
         keep_period=2_500,
+        num_workers=16,
     ),
     #
     # Fine-tuning Aloha configs.
