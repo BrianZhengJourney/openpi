@@ -366,6 +366,9 @@ class LeRobotBreadDataConfig(DataConfigFactory):
     reward-model dP per frame) is threaded through for RA-BC loss weighting.
     """
 
+    # Our pack uses the LeRobot v2.1 standard singular column name.
+    action_sequence_keys: Sequence[str] = ("action",)
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         repack_transform = _transforms.Group(
@@ -392,6 +395,7 @@ class LeRobotBreadDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
         )
 
 
