@@ -364,7 +364,7 @@ def train_loop(config: _config.TrainConfig):
         sample_data_loader = _data.create_data_loader(config, framework="pytorch", shuffle=False)
         sample_batch = next(iter(sample_data_loader))
         # Convert observation and actions to torch tensors
-        observation, actions = sample_batch
+        observation, actions, *_ = sample_batch  # loader yields (obs, actions, ra_bc_weight|None)
         sample_batch = observation.to_dict()
         sample_batch["actions"] = actions
 

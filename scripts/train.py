@@ -138,20 +138,27 @@ def train_step(
     config: _config.TrainConfig,
     rng: at.KeyArrayLike,
     state: training_utils.TrainState,
-    batch: tuple[_model.Observation, _model.Actions],
+    batch: tuple[_model.Observation, _model.Actions, at.Array | None],
 ) -> tuple[training_utils.TrainState, dict[str, at.Array]]:
     model = nnx.merge(state.model_def, state.params)
     model.train()
 
-    @at.typecheck
     def loss_fn(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
         chunked_loss = model.compute_loss(rng, observation, actions, train=True)
-        return jnp.mean(chunked_loss)
+        if rabc_weight is None:
+            return jnp.mean(chunked_loss)
+        # RA-BC (SARM2-bread-UMI docs/R1_OPENPI_CONFIG_DRAFT.md section 6):
+        # per-sample weight = raw reward-model dP at the chunk's start frame,
+        # normalized to mean 1 within the batch. Negative weights (~5-10% of
+        # frames, regressing motion) are kept by design.
+        per_sample = jnp.mean(chunked_loss.reshape(chunked_loss.shape[0], -1), axis=-1)
+        w = rabc_weight / (jnp.mean(rabc_weight) + 1e-8)
+        return jnp.mean(per_sample * w)
 
     train_rng = jax.random.fold_in(rng, state.step)
-    observation, actions = batch
+    observation, actions, rabc_weight = batch
 
     # Filter out frozen params.
     diff_state = nnx.DiffState(0, config.trainable_filter)
@@ -188,6 +195,13 @@ def train_step(
         "grad_norm": optax.global_norm(grads),
         "param_norm": optax.global_norm(kernel_params),
     }
+    if rabc_weight is not None:
+        # Reporting obligation: the effective-weight distribution must be
+        # visible (near-uniform on all-success data is the expected result).
+        wn = rabc_weight / (jnp.mean(rabc_weight) + 1e-8)
+        info["rabc_w_std"] = jnp.std(wn)
+        info["rabc_w_max"] = jnp.max(wn)
+        info["rabc_w_frac_neg"] = jnp.mean((wn < 0).astype(jnp.float32))
     return new_state, info
 
 

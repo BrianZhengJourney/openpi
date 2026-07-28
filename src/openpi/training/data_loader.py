@@ -537,4 +537,6 @@ class DataLoaderImpl(DataLoader):
 
     def __iter__(self):
         for batch in self._data_loader:
-            yield _model.Observation.from_dict(batch), batch["actions"]
+            # RA-BC (SARM2-bread-UMI): per-sample loss weight, None for
+            # datasets that don't carry the column.
+            yield _model.Observation.from_dict(batch), batch["actions"], batch.get("ra_bc_weight")

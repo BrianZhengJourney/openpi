@@ -19,6 +19,7 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
+import openpi.policies.bread_policy as bread_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
@@ -347,6 +348,45 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         model_transforms = ModelTransformFactory()(model_config)
 
         # We return all data transforms for training and inference. No need to change anything here.
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBreadDataConfig(DataConfigFactory):
+    """UMI bread-to-toaster (SARM2-bread-UMI repo, docs/R1_OPENPI_CONFIG_DRAFT.md).
+
+    The pack bakes the settled training transforms (20D relative_to_first
+    state, per-frame 14D stepwise-chained delta actions, absolute gripper),
+    so no DeltaActions transform is applied here. `ra_bc_weight` (raw
+    reward-model dP per frame) is threaded through for RA-BC loss weighting.
+    """
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "left_wrist_image": "observation.images.cam_left_wrist",
+                        "right_wrist_image": "observation.images.cam_right_wrist",
+                        "state": "observation.state",
+                        "actions": "action",
+                        "prompt": "prompt",
+                        "ra_bc_weight": "ra_bc_weight",
+                    }
+                )
+            ]
+        )
+        data_transforms = _transforms.Group(
+            inputs=[bread_policy.BreadInputs(model_type=model_config.model_type)],
+            outputs=[bread_policy.BreadOutputs()],
+        )
+        model_transforms = ModelTransformFactory()(model_config)
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=repack_transform,
@@ -760,6 +800,58 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
+    ),
+    #
+    # UMI bread-to-toaster (SARM2-bread-UMI). Tiny = 4-episode overfit gate;
+    # r1 = the real RA-BC run. See docs/R1_OPENPI_CONFIG_DRAFT.md over there.
+    #
+    TrainConfig(
+        name="pi05_bread_tiny",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_tiny",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=2.5e-5, decay_steps=2_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=2_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+    ),
+    TrainConfig(
+        name="pi05_bread_r1_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r1",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=20_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
     ),
     #
     # Fine-tuning Aloha configs.
