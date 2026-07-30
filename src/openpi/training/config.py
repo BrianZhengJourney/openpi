@@ -368,22 +368,24 @@ class LeRobotBreadDataConfig(DataConfigFactory):
 
     # Our pack uses the LeRobot v2.1 standard singular column name.
     action_sequence_keys: Sequence[str] = ("action",)
+    # False -> the ra_bc_weight column is not threaded to the train step at
+    # all (loader yields None -> uniform BC loss). Used by the *_bc control
+    # configs so RA-BC vs BC differ ONLY in the loss weights, same pack.
+    use_rabc_weight: bool = True
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_keys = {
+            "left_wrist_image": "observation.images.cam_left_wrist",
+            "right_wrist_image": "observation.images.cam_right_wrist",
+            "state": "observation.state",
+            "actions": "action",
+            "prompt": "prompt",
+        }
+        if self.use_rabc_weight:
+            repack_keys["ra_bc_weight"] = "ra_bc_weight"
         repack_transform = _transforms.Group(
-            inputs=[
-                _transforms.RepackTransform(
-                    {
-                        "left_wrist_image": "observation.images.cam_left_wrist",
-                        "right_wrist_image": "observation.images.cam_right_wrist",
-                        "state": "observation.state",
-                        "actions": "action",
-                        "prompt": "prompt",
-                        "ra_bc_weight": "ra_bc_weight",
-                    }
-                )
-            ]
+            inputs=[_transforms.RepackTransform(repack_keys)]
         )
         data_transforms = _transforms.Group(
             inputs=[bread_policy.BreadInputs(model_type=model_config.model_type)],
@@ -843,6 +845,62 @@ _CONFIGS = [
         data=LeRobotBreadDataConfig(
             repo_id="brianz/bread_r1",
             base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=20_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
+    # R2 (2026-07-30): 29D state (+9D inter-gripper, UMI PD2.3) and RA-BC
+    # weights v2 (chunk-delta, per-stage Eq.8-9) -- pack openpi_r2_top200.
+    # Identical schedule to r1 for comparability.
+    TrainConfig(
+        name="pi05_bread_r2_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r2",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=20_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
+    # Uniform-BC control on the SAME r2 pack (weights column not threaded):
+    # attributes any R2-vs-R2BC gap to the RA-BC weighting alone.
+    TrainConfig(
+        name="pi05_bread_r2_bc_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r2",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
         ),
         batch_size=32,
         lr_schedule=_optimizer.CosineDecaySchedule(
