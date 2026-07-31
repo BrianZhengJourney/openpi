@@ -286,6 +286,13 @@ def main(config: _config.TrainConfig):
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
+            # loss-vs-epochs axis (standing practice 2026-07-31): dataset
+            # size from the loader when available, else skip silently.
+            try:
+                n_frames = len(data_loader.torch_loader.dataset)  # type: ignore[attr-defined]
+                reduced_info["epoch"] = step * config.batch_size / n_frames
+            except Exception:
+                pass
             wandb.log(reduced_info, step=step)
             infos = []
         batch = next(data_iter)
