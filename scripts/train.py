@@ -286,13 +286,16 @@ def main(config: _config.TrainConfig):
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
-            # loss-vs-epochs axis (standing practice 2026-07-31): dataset
-            # size from the loader when available, else skip silently.
+            # loss-vs-epochs axis (standing practice 2026-07-31). torch_loader
+            # lives on the inner TorchDataLoader; DataLoaderImpl doesn't proxy
+            # it (this silently no-opped for all of r2_bc_15ep).
             try:
-                n_frames = len(data_loader.torch_loader.dataset)  # type: ignore[attr-defined]
+                inner = getattr(data_loader, "_data_loader", data_loader)
+                n_frames = len(inner.torch_loader.dataset)  # type: ignore[attr-defined]
                 reduced_info["epoch"] = step * config.batch_size / n_frames
-            except Exception:
-                pass
+            except Exception as e:
+                if step < config.log_interval * 2:
+                    logging.warning(f"epoch axis unavailable: {e}")
             wandb.log(reduced_info, step=step)
             infos = []
         batch = next(data_iter)
