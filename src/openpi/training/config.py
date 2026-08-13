@@ -985,6 +985,36 @@ _CONFIGS = [
         keep_period=2_500,
         num_workers=16,
     ),
+    # Uniform-BC control for pi05_bread_r2_rabc50_hicam: SAME pack, SAME 44k
+    # steps = 30 epochs, SAME cam_high -- only the loss weighting differs.
+    # Attributes any real-robot gap (incl. the observed jitter) to RA-BC alone.
+    TrainConfig(
+        name="pi05_bread_r2_bc50_hicam",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r2_top50",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=44_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=44_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
     # Tiny gate for the config above: same loss path (RA-BC weights ON) +
     # cam_high plumbing, against the 4-episode r2 tiny pack. The previously
     # passed r2_tiny_gate exercised neither -- run this before any paid spawn.
