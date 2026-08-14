@@ -1034,11 +1034,11 @@ _CONFIGS = [
         ),
         batch_size=32,
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=44_000, decay_lr=2.5e-6,
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=29_500, decay_lr=2.5e-6,
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        num_train_steps=44_000,
+        num_train_steps=29_500,
         freeze_filter=pi0_config.Pi0Config(
             pi05=True, action_horizon=40, discrete_state_input=False,
             paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
@@ -1061,11 +1061,11 @@ _CONFIGS = [
         ),
         batch_size=32,
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=44_000, decay_lr=2.5e-6,
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=29_500, decay_lr=2.5e-6,
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        num_train_steps=44_000,
+        num_train_steps=29_500,
         freeze_filter=pi0_config.Pi0Config(
             pi05=True, action_horizon=40, discrete_state_input=False,
             paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
