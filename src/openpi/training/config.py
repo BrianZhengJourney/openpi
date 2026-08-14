@@ -376,6 +376,10 @@ class LeRobotBreadDataConfig(DataConfigFactory):
     # mask True. Deployment/eval must then supply "high_image" (robot's
     # fixed top RealSense) -- see BreadInputs docstring for the domain gap.
     use_high_cam: bool = False
+    # True (r3) -> train-time transform composes the pack's per-step chained
+    # deltas into relative-to-chunk-start targets (one shared anchor, never
+    # accumulated at execution). Pair with a two_pose (14D anchor-free) pack.
+    chunk_relative: bool = False
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -393,11 +397,14 @@ class LeRobotBreadDataConfig(DataConfigFactory):
         repack_transform = _transforms.Group(
             inputs=[_transforms.RepackTransform(repack_keys)]
         )
+        data_inputs = [bread_policy.BreadInputs(
+            model_type=model_config.model_type,
+            use_high_cam=self.use_high_cam,
+        )]
+        if self.chunk_relative:
+            data_inputs.append(bread_policy.BreadChunkRelativeActions())
         data_transforms = _transforms.Group(
-            inputs=[bread_policy.BreadInputs(
-                model_type=model_config.model_type,
-                use_high_cam=self.use_high_cam,
-            )],
+            inputs=data_inputs,
             outputs=[bread_policy.BreadOutputs()],
         )
         model_transforms = ModelTransformFactory()(model_config)
@@ -1072,6 +1079,74 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
         keep_period=2_500,
+        num_workers=16,
+    ),
+    # ---- r3 generation (2026-08-14): AgRobotics umi_relative_ee IO design ----
+    # State: 14D anchor-free two-pose local state (pack openpi_r3_top50,
+    # state_mode=two_pose) -- no episode anchor, kills the reset-pose OOD.
+    # Actions: relative-to-chunk-start rotvec targets (BreadChunkRelativeActions
+    # composes the baked per-step deltas; executor uses ONE cached anchor).
+    # Serve with the r3 io-mode of serve_bread_xctrl (--no-inter-gripper
+    # implied). Directly comparable to Zhengmao's BC recipe: same action
+    # convention, same 20 epochs at 50 eps; remaining deltas = episode set,
+    # cam_high, our 14D state encoding.
+    TrainConfig(
+        name="pi05_bread_r3_bc50_hicam",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r3_top50",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+            chunk_relative=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=29_500, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=29_500,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
+    # Tiny overfit gate for r3: exercises the two_pose state + chunk-relative
+    # action transform end-to-end on the 4-episode r3 tiny pack. Run before
+    # the paid spawn; expect the same smooth loss collapse as prior gates.
+    TrainConfig(
+        name="pi05_bread_r3_tiny",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r3_tiny",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+            chunk_relative=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=2.5e-5, decay_steps=2_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=2_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=1_000,
         num_workers=16,
     ),
     # Tiny gate for the config above: same loss path (RA-BC weights ON) +

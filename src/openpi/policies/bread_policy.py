@@ -73,8 +73,73 @@ class BreadInputs(transforms.DataTransformFn):
         return inputs
 
 
+def _rotvec_to_matrix(rv: np.ndarray) -> np.ndarray:
+    """Rodrigues: (3,) rotation vector -> (3,3) rotation matrix."""
+    theta = np.linalg.norm(rv)
+    if theta < 1e-12:
+        return np.eye(3)
+    k = rv / theta
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+
+
+def _matrix_to_rotvec(R: np.ndarray) -> np.ndarray:
+    """Inverse Rodrigues: (3,3) rotation matrix -> (3,) rotation vector."""
+    cos = np.clip((np.trace(R) - 1) / 2, -1.0, 1.0)
+    theta = np.arccos(cos)
+    if theta < 1e-12:
+        return np.zeros(3)
+    if theta > np.pi - 1e-6:
+        # near-pi fallback via the symmetric part (chunk-relative rotations
+        # in a 1.3 s window never get here in practice)
+        A = (R + np.eye(3)) / 2
+        axis = np.sqrt(np.maximum(np.diagonal(A), 0))
+        axis = axis / (np.linalg.norm(axis) + 1e-12)
+        return axis * theta
+    axis = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    return axis / (2 * np.sin(theta)) * theta
+
+
+@dataclasses.dataclass(frozen=True)
+class BreadChunkRelativeActions(transforms.DataTransformFn):
+    """r3 action target: convert the horizon chunk of per-step chained deltas
+    (as baked in the r-packs: row t holds inv(T_t)@T_{t+1}) into
+    relative-to-chunk-start targets sharing ONE anchor (the current frame):
+
+        T_rel[k] = inv(T_t) @ T_{t+k+1} = d_t . d_{t+1} ... d_{t+k}
+
+    encoded [xyz, rotvec] per arm; absolute grippers pass through. This is the
+    AgRobotics/Zhengmao convention -- the executor composes every target with
+    the same cached anchor pose and never accumulates predictions. Episode-end
+    padding rows hold identity deltas, so padded targets freeze at the last
+    real pose (consistent with "hold position").
+
+    No-op at inference time (no "actions" key): the policy then OUTPUTS
+    chunk-relative targets which the serving bridge decodes against its anchor.
+    """
+
+    def __call__(self, data: dict) -> dict:
+        if "actions" not in data:
+            return data
+        acts = np.asarray(data["actions"])
+        out = np.array(acts, dtype=np.float64, copy=True)
+        for off in (0, 7):
+            T = np.eye(4)
+            for k in range(acts.shape[0]):
+                d = np.eye(4)
+                d[:3, :3] = _rotvec_to_matrix(acts[k, off + 3:off + 6].astype(np.float64))
+                d[:3, 3] = acts[k, off:off + 3]
+                T = T @ d
+                out[k, off:off + 3] = T[:3, 3]
+                out[k, off + 3:off + 6] = _matrix_to_rotvec(T[:3, :3])
+        data["actions"] = out.astype(acts.dtype)
+        return data
+
+
 @dataclasses.dataclass(frozen=True)
 class BreadOutputs(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         # 14 real action dims: [dxyz, axis-angle, abs-grip] x 2 arms.
+        # (For chunk_relative configs these are chunk-start-relative targets,
+        # decoded against the anchor by the serving bridge.)
         return {"actions": np.asarray(data["actions"][..., :14])}
