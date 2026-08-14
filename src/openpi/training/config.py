@@ -1015,6 +1015,65 @@ _CONFIGS = [
         keep_period=2_500,
         num_workers=16,
     ),
+    # 20D-state reruns of the two configs above (pack openpi_r2_top50_20d:
+    # byte-identical actions/weights/videos, state truncated to the 20D
+    # relative_to_first block). Motivation: deploy xctrl reports each arm in
+    # its OWN base frame, so the +9D inter-gripper feature (which needs both
+    # arms in one common frame) is untrustworthy at serving time -- drop it.
+    # Serve these with serve_bread_xctrl --no-inter-gripper.
+    TrainConfig(
+        name="pi05_bread_r2_rabc50_hicam_20d",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r2_top50_20d",
+            base_config=DataConfig(prompt_from_task=True),
+            use_high_cam=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=44_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=44_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
+    TrainConfig(
+        name="pi05_bread_r2_bc50_hicam_20d",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_r2_top50_20d",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=44_000, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=44_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
     # Tiny gate for the config above: same loss path (RA-BC weights ON) +
     # cam_high plumbing, against the 4-episode r2 tiny pack. The previously
     # passed r2_tiny_gate exercised neither -- run this before any paid spawn.
