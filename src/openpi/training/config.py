@@ -1118,6 +1118,40 @@ _CONFIGS = [
         keep_period=2_500,
         num_workers=16,
     ),
+    # ---- Zhengmao-aligned run (2026-08-17): random 50 bimanual eps (seed 42,
+    # NO reward selection), 15 epochs, uniform BC, 20D relative_to_first state
+    # (pack openpi_rand50, no inter-gripper) + chunk-relative rotvec actions.
+    # cam_high KEPT (user call). Vs Zhengmao's recipe the only deltas are:
+    # the random-50 draw, cam_high, and rot6d-vs-rotvec in the state encoding.
+    # Serve with serve_bread_xctrl (chunk_relative auto; state stays rel_first).
+    TrainConfig(
+        name="pi05_bread_zm_rand50",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_rand50",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+            chunk_relative=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=24_500, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=24_500,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        keep_period=2_500,
+        num_workers=16,
+    ),
     # Tiny overfit gate for r3: exercises the two_pose state + chunk-relative
     # action transform end-to-end on the 4-episode r3 tiny pack. Run before
     # the paid spawn; expect the same smooth loss collapse as prior gates.
