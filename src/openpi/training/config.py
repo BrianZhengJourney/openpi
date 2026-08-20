@@ -1187,6 +1187,34 @@ _CONFIGS = [
         keep_period=2_500,
         num_workers=16,
     ),
+    # ---- R6 (2026-08-21): FULL fine-tune of the R5 recipe (Zhengmao: his UMI
+    # models are FULL fine-tunes, "LoRA isn't good enough" -- our whole line was
+    # LoRA until now). Single change vs pi05_bread_zm_right50: no LoRA, nothing
+    # frozen, EMA 0.99 (openpi full-FT default). Same right50 pack, cam_high
+    # kept (user call), 24,750 steps = 15ep. Needs 70GB+ VRAM -> B200 only.
+    TrainConfig(
+        name="pi05_bread_zm_right50_full",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_right50",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+            chunk_relative=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=24_750, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=24_750,
+        ema_decay=0.99,
+        keep_period=5_000,
+        num_workers=16,
+    ),
     # Tiny overfit gate for r3: exercises the two_pose state + chunk-relative
     # action transform end-to-end on the 4-episode r3 tiny pack. Run before
     # the paid spawn; expect the same smooth loss collapse as prior gates.
