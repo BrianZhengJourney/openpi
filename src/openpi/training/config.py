@@ -1215,6 +1215,32 @@ _CONFIGS = [
         keep_period=5_000,
         num_workers=16,
     ),
+    # ---- R7 (2026-08-22): R6 full-FT recipe scaled to 100 right-first eps
+    # (107,464 frames; R6 robot verdict: handover WORKS, insertion lands on top
+    # of the toaster -- scaling data on the winning recipe before RABC A/B).
+    TrainConfig(
+        name="pi05_bread_zm_right100_full",
+        model=pi0_config.Pi0Config(
+            pi05=True, action_horizon=40, discrete_state_input=False,
+        ),
+        data=LeRobotBreadDataConfig(
+            repo_id="brianz/bread_right100",
+            base_config=DataConfig(prompt_from_task=True),
+            use_rabc_weight=False,
+            use_high_cam=True,
+            chunk_relative=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=50_350, decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=50_350,
+        ema_decay=0.99,
+        keep_period=5_000,
+        num_workers=16,
+    ),
     # Tiny overfit gate for r3: exercises the two_pose state + chunk-relative
     # action transform end-to-end on the 4-episode r3 tiny pack. Run before
     # the paid spawn; expect the same smooth loss collapse as prior gates.
